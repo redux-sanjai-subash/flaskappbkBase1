@@ -1,0 +1,91 @@
+/* =========================
+   Global Theme Overrides
+   ========================= */
+:root {
+  /* Brand Colors */
+  --bs-primary: #198754; /* Finance green */
+  --bs-secondary: #0dcaf0; /* Teal for accents */
+  --bs-dark: #212529;
+  --bs-light: #f8f9fa;
+
+  /* Typography */
+  --heading-font: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  --body-font: 'Roboto', Arial, sans-serif;
+}
+
+/* =========================
+   Base Styles
+   ========================= */
+body {
+  font-family: var(--body-font);
+  background-color: var(--bs-light);
+  color: var(--bs-dark);
+  padding-bottom: 60px; /* spacing above footer */
+  line-height: 1.6;
+}
+
+h1, h2, h3, h4, h5 {
+  font-family: var(--heading-font);
+  font-weight: 600;
+  color: var(--bs-primary);
+}
+
+/* =========================
+   Navbar
+   ========================= */
+.navbar {
+  background-color: var(--bs-primary) !important;
+}
+
+.navbar-brand {
+  font-weight: bold;
+  letter-spacing: 1px;
+}
+
+.nav-link {
+  color: #fff !important;
+  transition: color 0.2s ease-in-out;
+}
+
+.nav-link:hover {
+  color: var(--bs-secondary) !important;
+}
+
+/* =========================
+   Buttons
+   ========================= */
+.btn-primary {
+  background-color: var(--bs-primary);
+  border-color: var(--bs-primary);
+}
+
+.btn-primary:hover {
+  background-color: #146c43; /* darker green */
+  border-color: #146c43;
+}
+
+/* =========================
+   Footer
+   ========================= */
+footer {
+  border-top: 1px solid #eee;
+  background-color: #ffffff;
+  color: #6c757d;
+}
+
+footer small {
+  font-size: 0.9rem;
+}
+
+/* =========================
+   Utility Classes
+   ========================= */
+.card {
+  border-radius: 12px;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+}
+
+.container {
+  max-width: 1140px;
+}
+
