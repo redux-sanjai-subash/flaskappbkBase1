@@ -1,12 +1,11 @@
 from flask import Blueprint, render_template, redirect, url_for, flash, request, abort
 from .. import db
 from ..models import User, Transaction, Category, Account
-from .forms import SignupForm, LoginForm, TransactionForm, ProfileForm, ChangePasswordForm
+from .forms import SignupForm, LoginForm, TransactionForm
 from flask_login import login_user, logout_user, login_required, current_user
 from datetime import date
 from sqlalchemy.orm import joinedload
 from flask_wtf.csrf import generate_csrf
-from sqlalchemy.exc import IntegrityError
 
 main_bp = Blueprint("main", __name__, template_folder="templates")
 
@@ -250,61 +249,6 @@ def add_transaction():
                 flash(f"{field}: {e}", "danger")
 
     return render_template("main/add_transaction.html", form=form)
-
-
-# settings route
-@main_bp.route("/settings", methods=["GET", "POST"])
-@login_required
-def settings():
-    profile_form = ProfileForm(obj=current_user)
-    pwd_form = ChangePasswordForm()
-
-    # Profile update submitted
-    if "submit_profile" in request.form and profile_form.validate_on_submit():
-        new_email = profile_form.email.data.strip().lower()
-        new_username = profile_form.username.data.strip() if profile_form.username.data else None
-
-        # Check email uniqueness (ignore if same as current)
-        existing = User.query.filter_by(email=new_email).first()
-        if existing and existing.id != current_user.id:
-            flash("That email is already in use by another account.", "danger")
-            return redirect(url_for("main.settings"))
-
-        # Check username uniqueness if provided
-        if new_username:
-            u = User.query.filter_by(username=new_username).first()
-            if u and u.id != current_user.id:
-                flash("That username is already taken.", "danger")
-                return redirect(url_for("main.settings"))
-
-        # Update current_user fields
-        current_user.email = new_email
-        current_user.username = new_username
-
-        try:
-            db.session.commit()
-            flash("Profile updated successfully.", "success")
-        except IntegrityError:
-            db.session.rollback()
-            flash("Unable to update profile. Please try again.", "danger")
-
-        return redirect(url_for("main.settings"))
-
-    # Password change submitted
-    if "submit_password" in request.form and pwd_form.validate_on_submit():
-        # verify current password
-        if not current_user.check_password(pwd_form.current_password.data):
-            flash("Current password is incorrect.", "danger")
-            return redirect(url_for("main.settings"))
-
-        # update password
-        current_user.set_password(pwd_form.new_password.data)
-        db.session.commit()
-        flash("Password changed successfully.", "success")
-        return redirect(url_for("main.settings"))
-
-    # GET: render forms (profile_form already bound with current_user via obj=)
-    return render_template("main/settings.html", profile_form=profile_form, pwd_form=pwd_form)
 
 @main_bp.route("/logout")
 @login_required

@@ -23,38 +23,14 @@
         <div class="collapse navbar-collapse" id="navMenu">
           <ul class="navbar-nav ms-auto">
             <li class="nav-item"><a class="nav-link" href="{{ url_for('main.index') }}">Home</a></li>
-
-            {% if current_user.is_authenticated %}
-              <li class="nav-item"><a class="nav-link" href="{{ url_for('main.dashboard') }}">Dashboard</a></li>
-              <li class="nav-item"><a class="nav-link" href="{{ url_for('main.settings') }}">Settings</a></li>
-              <li class="nav-item"><a class="nav-link" href="{{ url_for('main.logout') }}">Logout</a></li>
-            {% else %}
-              <li class="nav-item"><a class="nav-link" href="{{ url_for('main.login') }}">Login</a></li>
-              <li class="nav-item"><a class="nav-link" href="{{ url_for('main.signup') }}">Signup</a></li>
-            {% endif %}
-          </ul>
+	    <li class="nav-item"><a class="nav-link" href="{{ url_for('main.login') }}">Login</a></li>
+	    <li class="nav-item"><a class="nav-link" href="{{ url_for('main.signup') }}">Signup</a></li>
+	    <li class="nav-item"><a class="nav-link" href="{{ url_for('main.logout') }}">Logout</a></li>
+	    <li class="nav-item"><a class="nav-link" href="{{ url_for('main.settings') }}">Settings</a></li>
+	  </ul>
         </div>
       </div>
     </nav>
-
-    {# Flash messages (Bootstrap alerts) #}
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        <div class="container mb-3">
-          {% for category, message in messages %}
-            {% set bs_class = 'info' %}
-            {% if category == 'success' %}{% set bs_class = 'success' %}
-            {% elif category == 'danger' or category == 'error' %}{% set bs_class = 'danger' %}
-            {% elif category == 'warning' %}{% set bs_class = 'warning' %}
-            {% endif %}
-            <div class="alert alert-{{ bs_class }} alert-dismissible fade show" role="alert">
-              {{ message }}
-              <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-            </div>
-          {% endfor %}
-        </div>
-      {% endif %}
-    {% endwith %}
 
     <main class="container">
       {% block content %}{% endblock %}
@@ -71,4 +47,3 @@
     {% block scripts %}{% endblock %}
   </body>
 </html>
-

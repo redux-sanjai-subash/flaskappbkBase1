@@ -14,39 +14,6 @@
     </div>
   </div>
 
-  <!-- Filters / Search -->
-  <div class="card mb-4">
-    <div class="card-body">
-      <form method="get" action="{{ url_for('main.dashboard') }}" class="row g-2 align-items-end">
-        <div class="col-auto">
-          <label class="form-label small">Start date</label>
-          <input type="date" name="start_date" class="form-control" value="{{ request.args.get('start_date', '') }}">
-        </div>
-        <div class="col-auto">
-          <label class="form-label small">End date</label>
-          <input type="date" name="end_date" class="form-control" value="{{ request.args.get('end_date', '') }}">
-        </div>
-        <div class="col-auto">
-          <label class="form-label small">Category</label>
-          <select name="category" class="form-select">
-            <option value="">All</option>
-            {% for c in categories %}
-              <option value="{{ c.name }}" {% if request.args.get('category') == c.name %}selected{% endif %}>{{ c.name }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="col-auto flex-grow-1">
-          <label class="form-label small">Search</label>
-          <input type="text" name="q" class="form-control" placeholder="Search description..." value="{{ request.args.get('q', '') }}">
-        </div>
-        <div class="col-auto">
-          <button type="submit" class="btn btn-outline-primary">Filter</button>
-          <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary ms-1">Reset</a>
-        </div>
-      </form>
-    </div>
-  </div>
-
   <!-- Summary cards -->
   <div class="row mb-4">
     <div class="col-md-4">
@@ -101,7 +68,7 @@
 
     {% if transactions %}
     <div class="table-responsive">
-      <table class="table table-striped align-middle">
+      <table class="table table-striped">
         <thead>
           <tr>
             <th>Date</th>
@@ -110,7 +77,6 @@
             <th>Description</th>
             <th class="text-end">Amount</th>
             <th>Type</th>
-            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -119,23 +85,11 @@
             <td>
               {% if t.transaction_date %}{{ t.transaction_date.strftime('%Y-%m-%d') }}{% else %}-{% endif %}
             </td>
-            <td>{{ t.account.name if t.account else (t.account_id or '-') }}</td>
-            <td>{{ t.category.name if t.category else (t.category_id or '-') }}</td>
+            <td>{{ t.account.name if t.account is defined else (t.account_id or '-') }}</td>
+            <td>{{ t.category.name if t.category is defined else (t.category_id or '-') }}</td>
             <td>{{ t.description or "" }}</td>
-            <td class="text-end">
-              {{ ('+' if t.type == 'income' else '-') ~ ('%.2f' % (t.amount or 0.0)) }}
-            </td>
+            <td class="text-end">{{ ('+' if t.type == 'income' else '-') ~ ('%.2f' % (t.amount or 0.0)) }}</td>
             <td>{{ t.type or "" }}</td>
-            <td>
-              <a href="{{ url_for('main.edit_transaction', tx_id=t.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
-
-              <form action="{{ url_for('main.delete_transaction', tx_id=t.id) }}" method="post" style="display:inline;">
-                {% if csrf_token is defined %}
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                {% endif %}
-                <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete this transaction?');">Delete</button>
-              </form>
-            </td>
           </tr>
           {% endfor %}
         </tbody>

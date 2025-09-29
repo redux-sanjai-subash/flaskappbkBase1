@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Settings — ChelaV{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+      <h1 class="h3">Settings</h1>
+      <p class="text-muted">Update profile details or change your password below.</p>
+    </div>
+    <div>
+      <a href="{{ url_for('main.dashboard') }}" class="btn btn-outline-secondary">Back to Dashboard</a>
+    </div>
+  </div>
+
+  <div class="row g-4">
+    <!-- Profile card -->
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-body">
+          <h5 class="card-title">Profile</h5>
+          <form method="post" action="{{ url_for('main.settings') }}">
+            {{ profile_form.hidden_tag() }}
+
+            <div class="mb-3">
+              {{ profile_form.email.label(class_='form-label small') }}
+              {{ profile_form.email(class_='form-control') }}
+            </div>
+
+            <div class="mb-3">
+              {{ profile_form.username.label(class_='form-label small') }}
+              {{ profile_form.username(class_='form-control') }}
+            </div>
+
+            <button type="submit" name="submit_profile" class="btn btn-primary">{{ profile_form.submit_profile.label.text }}</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Change password card -->
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-body">
+          <h5 class="card-title">Change Password</h5>
+          <form method="post" action="{{ url_for('main.settings') }}">
+            {{ pwd_form.hidden_tag() }}
+
+            <div class="mb-3">
+              {{ pwd_form.current_password.label(class_='form-label small') }}
+              {{ pwd_form.current_password(class_='form-control') }}
+            </div>
+
+            <div class="mb-3">
+              {{ pwd_form.new_password.label(class_='form-label small') }}
+              {{ pwd_form.new_password(class_='form-control') }}
+            </div>
+
+            <div class="mb-3">
+              {{ pwd_form.confirm_new_password.label(class_='form-label small') }}
+              {{ pwd_form.confirm_new_password(class_='form-control') }}
+            </div>
+
+            <button type="submit" name="submit_password" class="btn btn-warning">{{ pwd_form.submit_password.label.text }}</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+

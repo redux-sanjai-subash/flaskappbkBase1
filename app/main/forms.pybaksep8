@@ -1,9 +1,9 @@
 """
-Forms for the main blueprint.
+Forms for the main blueprint (signup for now).
 """
 from datetime import date
 from flask_wtf import FlaskForm
-from wtforms import StringField, DecimalField, SelectField, DateField, SubmitField, PasswordField, EmailField
+from wtforms import StringField, DecimalField, SelectField, DateField, SubmitField, PasswordField
 from wtforms.validators import DataRequired, Email, EqualTo, Length, NumberRange
 
 class SignupForm(FlaskForm):
@@ -27,14 +27,3 @@ class TransactionForm(FlaskForm):
     category = StringField("Category", validators=[DataRequired(), Length(max=50)])
     date = DateField("Date", default=date.today, validators=[DataRequired()])
     submit = SubmitField("Add Transaction")
-
-class ProfileForm(FlaskForm):
-    email = EmailField("Email", validators=[DataRequired(), Email()])
-    username = StringField("Username", validators=[Length(min=3, max=150)])
-    submit_profile = SubmitField("Update Profile")
-
-class ChangePasswordForm(FlaskForm):
-    current_password = PasswordField("Current Password", validators=[DataRequired()])
-    new_password = PasswordField("New Password", validators=[DataRequired(), Length(min=6)])
-    confirm_new_password = PasswordField("Confirm New Password", validators=[DataRequired(), EqualTo("new_password")])
-    submit_password = SubmitField("Change Password")
