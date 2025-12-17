@@ -3,8 +3,8 @@
    ========================= */
 :root {
   /* Brand Colors */
-  --bs-primary: #198754; /* Finance green */
-  --bs-secondary: #0dcaf0; /* Teal for accents */
+  --bs-primary: #09778f; /* Finance green */
+  --bs-secondary: #985c90; /* Teal for accents */
   --bs-dark: #212529;
   --bs-light: #f8f9fa;
 
@@ -60,8 +60,8 @@ h1, h2, h3, h4, h5 {
 }
 
 .btn-primary:hover {
-  background-color: #146c43; /* darker green */
-  border-color: #146c43;
+  background-color: #055871; /* darker green */
+  border-color: #055871;
 }
 
 /* =========================

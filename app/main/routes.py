@@ -1,154 +1,39 @@
 from flask import Blueprint, render_template, redirect, url_for, flash, request, abort
 from .. import db
-from ..models import User, Transaction, Category, Account
-from .forms import SignupForm, LoginForm, TransactionForm, ProfileForm, ChangePasswordForm
+from ..models import User, Domain, Project, ManualDomain
+from ..utils import fetch_ssl_details
+from .forms import SignupForm, LoginForm, ProfileForm, ChangePasswordForm, DomainFilterForm, DomainSearchForm
 from flask_login import login_user, logout_user, login_required, current_user
-from datetime import date
 from sqlalchemy.orm import joinedload
-from flask_wtf.csrf import generate_csrf
 from sqlalchemy.exc import IntegrityError
+from datetime import datetime, timedelta, date
 
 main_bp = Blueprint("main", __name__, template_folder="templates")
 
-def recompute_account_balance(account):
-    """Recompute the account.balance from all transactions for that account."""
-    txns = Transaction.query.filter_by(account_id=account.id).all()
-    balance = 0.0
-    for t in txns:
-        amt = float(t.amount or 0.0)
-        balance += amt if getattr(t, "type", "") == "income" else -amt
-    account.balance = balance
-    db.session.commit()
+def compute_status(days_left):
+    """
+    Returns a string status based on days left:
+    - Expired: days_left < 0
+    - Expiring Soon: 0 <= days_left <= 30
+    - Active: days_left > 30
+    - Unknown: days_left is None
+    """
+    if days_left is None:
+        return "Unknown"
+    elif days_left < 0:
+        return "Expired"
+    elif days_left <= 30:
+        return "Expiring Soon"
+    else:
+        return "Active"
 
+
+# ---------------------------
+# Authentication routes
+# ---------------------------
 @main_bp.route('/')
 def index():
-    return render_template('main/index.html')
-
-@main_bp.route("/edit_transaction/<int:tx_id>", methods=["GET", "POST"])
-@login_required
-def edit_transaction(tx_id):
-    # ensure this transaction belongs to the current user by joining Account
-    txn = (
-        Transaction.query
-        .join(Account, Transaction.account_id == Account.id)
-        .filter(Transaction.id == tx_id, Account.user_id == current_user.id)
-        .first_or_404()
-    )
-
-    form = TransactionForm(obj=txn)
-
-    # Pre-fill category name on GET since TransactionForm uses a StringField for category
-    if request.method == 'GET' and txn.category:
-        form.category.data = txn.category.name
-
-    if form.validate_on_submit():
-        # Update transaction fields
-        txn.description = form.description.data
-        txn.amount = float(form.amount.data)
-        txn.type = form.type.data
-        txn.transaction_date = form.date.data
-
-        # find or create category for this user
-        cat = Category.query.filter_by(user_id=current_user.id, name=form.category.data).first()
-        if not cat:
-            cat = Category(user_id=current_user.id, name=form.category.data, type=form.type.data)
-            db.session.add(cat)
-            db.session.commit()
-        txn.category_id = cat.id
-
-        db.session.commit()
-
-        # recompute account balance to be safe
-        if txn.account:
-            recompute_account_balance(txn.account)
-
-        flash("Transaction updated successfully!", "success")
-        return redirect(url_for("main.dashboard"))
-
-    # If POST and validation failed, flash errors
-    if request.method == "POST":
-        for field, errs in form.errors.items():
-            for e in errs:
-                flash(f"{field}: {e}", "danger")
-
-    return render_template("main/edit_transaction.html", form=form, txn=txn)
-
-
-@main_bp.route("/delete_transaction/<int:tx_id>", methods=["POST"])
-@login_required
-def delete_transaction(tx_id):
-    txn = (
-        Transaction.query
-        .join(Account, Transaction.account_id == Account.id)
-        .filter(Transaction.id == tx_id, Account.user_id == current_user.id)
-        .first_or_404()
-    )
-
-    account = txn.account
-    db.session.delete(txn)
-    db.session.commit()
-
-    # recompute account balance after deletion
-    if account:
-        recompute_account_balance(account)
-
-    flash("Transaction deleted.", "info")
-    return redirect(url_for("main.dashboard"))
-
-
-@main_bp.route('/dashboard')
-@login_required
-def dashboard():
-    # Get user's accounts and categories
-    accounts = Account.query.filter_by(user_id=current_user.id).all()
-    categories = Category.query.filter_by(user_id=current_user.id).all()
-
-    # Base query: include joinedload so t.account and t.category are available without extra queries
-    q = (
-        Transaction.query
-        .options(
-            joinedload(Transaction.account),
-            joinedload(Transaction.category)
-        )
-        .join(Account, Transaction.account_id == Account.id)
-        .filter(Account.user_id == current_user.id)
-    )
-
-    # Optional filters (from querystring) for future use / UI
-    start = request.args.get("start_date")
-    end = request.args.get("end_date")
-    cat = request.args.get("category")  # expects category name; you can switch to id if preferred
-    qtext = request.args.get("q")
-
-    if start:
-        q = q.filter(Transaction.transaction_date >= start)
-    if end:
-        q = q.filter(Transaction.transaction_date <= end)
-    if cat:
-        # join category and filter by name
-        q = q.join(Category, Transaction.category_id == Category.id).filter(Category.name == cat)
-    if qtext:
-        q = q.filter(Transaction.description.ilike(f"%{qtext}%"))
-
-    transactions = q.order_by(Transaction.transaction_date.desc()).all()
-
-    # Summaries (same logic you used)
-    total_income = sum(float(t.amount or 0.0) for t in transactions if getattr(t, "type", "") == "income")
-    total_expense = sum(float(t.amount or 0.0) for t in transactions if getattr(t, "type", "") != "income")
-    total_balance = sum(float(a.balance or 0.0) for a in accounts) if accounts else (total_income - total_expense)
-
-    # If you already have CSRFProtect(app) enabled globally, you don't need to pass generate_csrf.
-    # But if not, passing this lets your template call csrf_token() to get a token for the inline delete form.
-    return render_template(
-        'main/dashboard.html',
-        accounts=accounts,
-        categories=categories,
-        transactions=transactions,
-        total_income=total_income,
-        total_expense=total_expense,
-        total_balance=total_balance,
-        csrf_token=generate_csrf  # optional: template can call csrf_token()
-    )
+    return redirect(url_for("main.login"))
 
 
 @main_bp.route("/login", methods=["GET", "POST"])
@@ -168,16 +53,15 @@ def login():
             flash("Invalid email or password", "danger")
     return render_template("main/login.html", form=form)
 
+
 @main_bp.route("/signup", methods=["GET", "POST"])
 def signup():
     form = SignupForm()
     if form.validate_on_submit():
-        # Check if email already exists
         if User.query.filter_by(email=form.email.data).first():
             flash("Email already registered. Please log in.", "warning")
             return redirect(url_for("main.signup"))
 
-        # Create new user
         new_user = User(
             email=form.email.data,
             username=form.username.data or None,
@@ -186,125 +70,11 @@ def signup():
 
         db.session.add(new_user)
         db.session.commit()
-
         flash("Signup successful! You can now log in.", "success")
         return redirect(url_for("main.login"))
 
     return render_template("main/signup.html", form=form)
 
-@main_bp.route("/add_transaction", methods=["GET", "POST"])
-@login_required
-def add_transaction():
-    form = TransactionForm()
-
-    # Optionally populate category choices if you convert Category field to SelectField later
-    if form.validate_on_submit():
-        # Ensure user has at least one account
-        account = Account.query.filter_by(user_id=current_user.id).first()
-        if not account:
-            account = Account(
-                user_id=current_user.id,
-                name="Default Wallet",
-                type="Wallet",
-                balance=0.0
-            )
-            db.session.add(account)
-            db.session.commit()  # commit to get account.id
-
-        # Find or create category for current user
-        cat = Category.query.filter_by(user_id=current_user.id, name=form.category.data).first()
-        if not cat:
-            cat = Category(
-                user_id=current_user.id,
-                name=form.category.data,
-                type=form.type.data  # set type from form (income/expense)
-            )
-            db.session.add(cat)
-            db.session.commit()  # commit to get cat.id
-
-        # Create Transaction — use the model's field names (account_id, category_id, transaction_date)
-        new_txn = Transaction(
-            account_id=account.id,
-            category_id=cat.id,
-            amount=float(form.amount.data),
-            type=form.type.data,
-            description=form.description.data,
-            transaction_date=form.date.data  # use the field name in your model
-        )
-        db.session.add(new_txn)
-
-        # Update account balance (simple logic)
-        if form.type.data == "income":
-            account.balance = (account.balance or 0.0) + float(form.amount.data)
-        else:
-            account.balance = (account.balance or 0.0) - float(form.amount.data)
-
-        db.session.commit()
-        flash("Transaction added successfully!", "success")
-        return redirect(url_for("main.dashboard"))
-
-    # If POST and validation failed, flash errors so you can see them in UI
-    if request.method == "POST":
-        for field, errs in form.errors.items():
-            for e in errs:
-                flash(f"{field}: {e}", "danger")
-
-    return render_template("main/add_transaction.html", form=form)
-
-
-# settings route
-@main_bp.route("/settings", methods=["GET", "POST"])
-@login_required
-def settings():
-    profile_form = ProfileForm(obj=current_user)
-    pwd_form = ChangePasswordForm()
-
-    # Profile update submitted
-    if "submit_profile" in request.form and profile_form.validate_on_submit():
-        new_email = profile_form.email.data.strip().lower()
-        new_username = profile_form.username.data.strip() if profile_form.username.data else None
-
-        # Check email uniqueness (ignore if same as current)
-        existing = User.query.filter_by(email=new_email).first()
-        if existing and existing.id != current_user.id:
-            flash("That email is already in use by another account.", "danger")
-            return redirect(url_for("main.settings"))
-
-        # Check username uniqueness if provided
-        if new_username:
-            u = User.query.filter_by(username=new_username).first()
-            if u and u.id != current_user.id:
-                flash("That username is already taken.", "danger")
-                return redirect(url_for("main.settings"))
-
-        # Update current_user fields
-        current_user.email = new_email
-        current_user.username = new_username
-
-        try:
-            db.session.commit()
-            flash("Profile updated successfully.", "success")
-        except IntegrityError:
-            db.session.rollback()
-            flash("Unable to update profile. Please try again.", "danger")
-
-        return redirect(url_for("main.settings"))
-
-    # Password change submitted
-    if "submit_password" in request.form and pwd_form.validate_on_submit():
-        # verify current password
-        if not current_user.check_password(pwd_form.current_password.data):
-            flash("Current password is incorrect.", "danger")
-            return redirect(url_for("main.settings"))
-
-        # update password
-        current_user.set_password(pwd_form.new_password.data)
-        db.session.commit()
-        flash("Password changed successfully.", "success")
-        return redirect(url_for("main.settings"))
-
-    # GET: render forms (profile_form already bound with current_user via obj=)
-    return render_template("main/settings.html", profile_form=profile_form, pwd_form=pwd_form)
 
 @main_bp.route("/logout")
 @login_required
@@ -312,3 +82,281 @@ def logout():
     logout_user()
     flash("You have been logged out.", "info")
     return redirect(url_for("main.login"))
+
+
+# ---------------------------
+# Dashboard
+# ---------------------------
+@main_bp.route('/dashboard', methods=["GET", "POST"])
+@login_required
+def dashboard():
+    projects = Project.query.all()
+
+    filter_form = DomainFilterForm()
+    filter_form.project_id.choices = [(0, "All Projects")] + [(p.id, p.name) for p in projects]
+    search_form = DomainSearchForm()
+
+    all_domains = Domain.query.options(joinedload(Domain.project)).all()
+    manual_domains = ManualDomain.query.options(joinedload(ManualDomain.project)).all()
+
+    # Normalize ManualDomains
+    normalized_manual_domains = []
+    for m in manual_domains:
+        normalized_manual_domains.append(type('DomainLike', (), {
+            'id': m.id,
+            'domain_name': m.domain_name,
+            'project': m.project,
+            'provider': m.provider,
+            'ssl_expiry': m.ssl_expiry,
+            'days_left': m.days_left,
+            'manual_override': True,
+            'status': compute_status(m.days_left)
+        })())
+
+    # Normalize Domains
+    normalized_domains = []
+    for d in all_domains:
+        normalized_domains.append(type('DomainLike', (), {
+            'id': d.id,
+            'domain_name': d.domain_name,
+            'project': d.project,
+            'provider': d.provider,
+            'ssl_expiry': d.ssl_expiry,
+            'days_left': d.days_left,
+            'manual_override': False,
+            'status': compute_status(d.days_left)
+        })())
+
+    # Combine both
+    domains = normalized_domains + normalized_manual_domains
+
+    # Apply filters or search
+    if request.method == "POST":
+        if "filter" in request.form:
+            selected_project = filter_form.project_id.data
+            show_manual = filter_form.show_manual.data
+
+            if selected_project and selected_project != 0:
+                domains = [d for d in domains if d.project and d.project.id == selected_project]
+
+            if show_manual:
+                domains = [d for d in domains if d.manual_override]
+
+        elif "search" in request.form:
+            search_term = search_form.search_query.data.strip().lower()
+            if search_term:
+                domains = [
+                    d for d in domains
+                    if (search_term in d.domain_name.lower())
+                    or (d.project and search_term in d.project.name.lower())
+                    or (d.provider and search_term in d.provider.lower())
+                ]
+
+    domains.sort(key=lambda d: (d.days_left if d.days_left is not None else float('inf')))
+
+    return render_template(
+        "main/dashboard.html",
+        domains=domains,
+        filter_form=filter_form,
+        search_form=search_form,
+    )
+
+
+# ---------------------------
+# Domain CRUD routes
+# ---------------------------
+@main_bp.route("/domain/add", methods=["GET", "POST"])
+@login_required
+def add_domain():
+    projects = Project.query.all()
+    if request.method == "POST":
+        domain_name = request.form.get("domain_name").strip()
+        project_id = request.form.get("project_id")
+        manual_override = bool(request.form.get("manual_override"))
+
+        # Check duplicates
+        if Domain.query.filter_by(domain_name=domain_name).first() or ManualDomain.query.filter_by(domain_name=domain_name).first():
+            flash("Domain already exists.", "danger")
+            return redirect(url_for("main.add_domain"))
+
+        if manual_override:
+            expiry_str = request.form.get("ssl_expiry")
+            ssl_expiry = datetime.strptime(expiry_str, "%Y-%m-%d").date() if expiry_str else None
+
+            manual_domain = ManualDomain(
+                domain_name=domain_name,
+                project_id=project_id or None,
+                provider=request.form.get("provider"),
+                ssl_expiry=ssl_expiry,
+            )
+            db.session.add(manual_domain)
+        else:
+            ssl_info = fetch_ssl_details(domain_name)
+            provider = ssl_info["provider"] if ssl_info else None
+            ssl_expiry = ssl_info["expiry"] if ssl_info else None
+
+            domain = Domain(
+                domain_name=domain_name,
+                project_id=project_id or None,
+                provider=provider,
+                ssl_expiry=ssl_expiry,
+            )
+            db.session.add(domain)
+
+        db.session.commit()
+        flash("Domain added successfully.", "success")
+        return redirect(url_for("main.dashboard"))
+
+    return render_template("main/domain_add.html", projects=projects)
+
+@main_bp.route("/domain/<string:domain_type>/<int:domain_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_domain(domain_type, domain_id):
+    # --- Load domain explicitly based on type ---
+    if domain_type == "auto":
+        domain = Domain.query.get_or_404(domain_id)
+        manual_domain = None
+    elif domain_type == "manual":
+        manual_domain = ManualDomain.query.get_or_404(domain_id)
+        domain = None
+    else:
+        abort(404)
+
+    projects = Project.query.all()
+
+    if request.method == "POST":
+        is_manual = bool(request.form.get("manual_override"))
+        domain_name = request.form.get("domain_name").strip()
+        project_id = request.form.get("project_id") or None
+
+        # -------------------------
+        # Switch to MANUAL domain
+        # -------------------------
+        if is_manual:
+            provider = request.form.get("provider")
+            expiry_str = request.form.get("ssl_expiry")
+            ssl_expiry = (
+                datetime.strptime(expiry_str, "%Y-%m-%d").date()
+                if expiry_str else None
+            )
+
+            # auto → manual
+            if domain:
+                new_manual = ManualDomain(
+                    domain_name=domain_name,
+                    project_id=project_id,
+                    provider=provider,
+                    ssl_expiry=ssl_expiry,
+                )
+                db.session.delete(domain)
+                db.session.add(new_manual)
+
+            # manual → manual (edit)
+            else:
+                manual_domain.domain_name = domain_name
+                manual_domain.project_id = project_id
+                manual_domain.provider = provider
+                manual_domain.ssl_expiry = ssl_expiry
+
+        # -------------------------
+        # Switch to AUTO domain
+        # -------------------------
+        else:
+            ssl_info = fetch_ssl_details(domain_name)
+            provider = ssl_info["provider"] if ssl_info else None
+            ssl_expiry = ssl_info["expiry"] if ssl_info else None
+
+            # manual → auto
+            if manual_domain:
+                new_domain = Domain(
+                    domain_name=domain_name,
+                    project_id=project_id,
+                    provider=provider,
+                    ssl_expiry=ssl_expiry,
+                )
+                db.session.delete(manual_domain)
+                db.session.add(new_domain)
+
+            # auto → auto (edit)
+            else:
+                domain.domain_name = domain_name
+                domain.project_id = project_id
+                domain.provider = provider
+                domain.ssl_expiry = ssl_expiry
+
+        db.session.commit()
+        flash("Domain updated successfully.", "success")
+        return redirect(url_for("main.dashboard"))
+
+    # --- Correct object passed to template ---
+    current_data = manual_domain if domain_type == "manual" else domain
+    return render_template(
+        "main/domain_edit.html",
+        domain=current_data,
+        projects=projects,
+        domain_type=domain_type,
+    )
+
+
+
+@main_bp.route("/domain/<int:domain_id>/delete", methods=["POST"])
+@login_required
+def delete_domain(domain_id):
+    domain = Domain.query.get(domain_id)
+    manual_domain = ManualDomain.query.get(domain_id)
+
+    if not domain and not manual_domain:
+        abort(404)
+
+    db.session.delete(domain or manual_domain)
+    db.session.commit()
+    flash("Domain deleted successfully.", "success")
+    return redirect(url_for("main.dashboard"))
+
+# ---------------------------
+# User Settings
+# ---------------------------
+@main_bp.route("/settings", methods=["GET", "POST"])
+@login_required
+def settings():
+    profile_form = ProfileForm(obj=current_user)
+    pwd_form = ChangePasswordForm()
+
+    # Profile update
+    if "submit_profile" in request.form and profile_form.validate_on_submit():
+        new_email = profile_form.email.data.strip().lower()
+        new_username = profile_form.username.data.strip() if profile_form.username.data else None
+
+        existing = User.query.filter_by(email=new_email).first()
+        if existing and existing.id != current_user.id:
+            flash("That email is already in use by another account.", "danger")
+            return redirect(url_for("main.settings"))
+
+        if new_username:
+            u = User.query.filter_by(username=new_username).first()
+            if u and u.id != current_user.id:
+                flash("That username is already taken.", "danger")
+                return redirect(url_for("main.settings"))
+
+        current_user.email = new_email
+        current_user.username = new_username
+        try:
+            db.session.commit()
+            flash("Profile updated successfully.", "success")
+        except IntegrityError:
+            db.session.rollback()
+            flash("Unable to update profile. Please try again.", "danger")
+        return redirect(url_for("main.settings"))
+
+    # Password change
+    if "submit_password" in request.form and pwd_form.validate_on_submit():
+        if not current_user.check_password(pwd_form.current_password.data):
+            flash("Current password is incorrect.", "danger")
+            return redirect(url_for("main.settings"))
+
+        current_user.set_password(pwd_form.new_password.data)
+        db.session.commit()
+        flash("Password changed successfully.", "success")
+        return redirect(url_for("main.settings"))
+
+    return render_template("main/settings.html", profile_form=profile_form, pwd_form=pwd_form)

@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+.env
+.env.*
+
+# Logs
+logs/
+*.log
+
+# Databases
+*.db
+*.sqlite3
+
+# OS junk
+.DS_Store
+
+# Backup files
+*.bk
+*.bkk
+*.bkkk
+*bk*
+

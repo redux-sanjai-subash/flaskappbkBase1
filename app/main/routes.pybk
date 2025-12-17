@@ -1,20 +1,33 @@
-from flask import Blueprint, render_template, redirect, url_for, flash, request
+from flask import Blueprint, render_template, redirect, url_for, flash, request, abort
 from .. import db
-from ..models import User, Transaction, Category, Account
-from .forms import SignupForm, LoginForm, TransactionForm
+from ..models import User, Domain
+from .forms import SignupForm, LoginForm, ProfileForm, ChangePasswordForm
 from flask_login import login_user, logout_user, login_required, current_user
 from datetime import date
+from sqlalchemy.orm import joinedload
+from flask_wtf.csrf import generate_csrf
+from sqlalchemy.exc import IntegrityError
 
 main_bp = Blueprint("main", __name__, template_folder="templates")
+
+def recompute_account_balance(account):
+    """Recompute the account.balance from all transactions for that account."""
+    txns = Transaction.query.filter_by(account_id=account.id).all()
+    balance = 0.0
+    for t in txns:
+        amt = float(t.amount or 0.0)
+        balance += amt if getattr(t, "type", "") == "income" else -amt
+    account.balance = balance
+    db.session.commit()
 
 @main_bp.route('/')
 def index():
     return render_template('main/index.html')
 
 @main_bp.route('/dashboard')
-@login_required
 def dashboard():
     return render_template('main/dashboard.html')
+
 
 @main_bp.route("/login", methods=["GET", "POST"])
 def login():
@@ -57,64 +70,60 @@ def signup():
 
     return render_template("main/signup.html", form=form)
 
-@main_bp.route("/add_transaction", methods=["GET", "POST"])
+
+# settings route
+@main_bp.route("/settings", methods=["GET", "POST"])
 @login_required
-def add_transaction():
-    form = TransactionForm()
+def settings():
+    profile_form = ProfileForm(obj=current_user)
+    pwd_form = ChangePasswordForm()
 
-    # Optionally populate category choices if you convert Category field to SelectField later
-    if form.validate_on_submit():
-        # Ensure user has at least one account
-        account = Account.query.filter_by(user_id=current_user.id).first()
-        if not account:
-            account = Account(
-                user_id=current_user.id,
-                name="Default Wallet",
-                type="Wallet",
-                balance=0.0
-            )
-            db.session.add(account)
-            db.session.commit()  # commit to get account.id
+    # Profile update submitted
+    if "submit_profile" in request.form and profile_form.validate_on_submit():
+        new_email = profile_form.email.data.strip().lower()
+        new_username = profile_form.username.data.strip() if profile_form.username.data else None
 
-        # Find or create category for current user
-        cat = Category.query.filter_by(user_id=current_user.id, name=form.category.data).first()
-        if not cat:
-            cat = Category(
-                user_id=current_user.id,
-                name=form.category.data,
-                type=form.type.data  # set type from form (income/expense)
-            )
-            db.session.add(cat)
-            db.session.commit()  # commit to get cat.id
+        # Check email uniqueness (ignore if same as current)
+        existing = User.query.filter_by(email=new_email).first()
+        if existing and existing.id != current_user.id:
+            flash("That email is already in use by another account.", "danger")
+            return redirect(url_for("main.settings"))
 
-        # Create Transaction — use the model's field names (account_id, category_id, transaction_date)
-        new_txn = Transaction(
-            account_id=account.id,
-            category_id=cat.id,
-            amount=float(form.amount.data),
-            type=form.type.data,
-            description=form.description.data,
-            transaction_date=form.date.data  # use the field name in your model
-        )
-        db.session.add(new_txn)
+        # Check username uniqueness if provided
+        if new_username:
+            u = User.query.filter_by(username=new_username).first()
+            if u and u.id != current_user.id:
+                flash("That username is already taken.", "danger")
+                return redirect(url_for("main.settings"))
 
-        # Update account balance (simple logic)
-        if form.type.data == "income":
-            account.balance = (account.balance or 0.0) + float(form.amount.data)
-        else:
-            account.balance = (account.balance or 0.0) - float(form.amount.data)
+        # Update current_user fields
+        current_user.email = new_email
+        current_user.username = new_username
 
+        try:
+            db.session.commit()
+            flash("Profile updated successfully.", "success")
+        except IntegrityError:
+            db.session.rollback()
+            flash("Unable to update profile. Please try again.", "danger")
+
+        return redirect(url_for("main.settings"))
+
+    # Password change submitted
+    if "submit_password" in request.form and pwd_form.validate_on_submit():
+        # verify current password
+        if not current_user.check_password(pwd_form.current_password.data):
+            flash("Current password is incorrect.", "danger")
+            return redirect(url_for("main.settings"))
+
+        # update password
+        current_user.set_password(pwd_form.new_password.data)
         db.session.commit()
-        flash("Transaction added successfully!", "success")
-        return redirect(url_for("main.dashboard"))
+        flash("Password changed successfully.", "success")
+        return redirect(url_for("main.settings"))
 
-    # If POST and validation failed, flash errors so you can see them in UI
-    if request.method == "POST":
-        for field, errs in form.errors.items():
-            for e in errs:
-                flash(f"{field}: {e}", "danger")
-
-    return render_template("main/add_transaction.html", form=form)
+    # GET: render forms (profile_form already bound with current_user via obj=)
+    return render_template("main/settings.html", profile_form=profile_form, pwd_form=pwd_form)
 
 @main_bp.route("/logout")
 @login_required

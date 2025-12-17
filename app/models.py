@@ -3,7 +3,7 @@ Database models for Chelav.
 """
 
 from . import db
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_login import UserMixin
 
@@ -20,10 +20,6 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(256), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # Relationships
-    accounts = db.relationship("Account", backref="owner", lazy=True, cascade="all, delete-orphan")
-    categories = db.relationship("Category", backref="user", lazy=True, cascade="all, delete-orphan")
-
     def set_password(self, password: str) -> None:
         """Hash and store the password."""
         self.password_hash = generate_password_hash(password)
@@ -35,98 +31,126 @@ class User(UserMixin, db.Model):
     def __repr__(self) -> str:
         return f"<User id={self.id} email={self.email}>"
 
-
 # ---------------------------
-# Accounts / Wallets
+# Project Model
 # ---------------------------
-class Account(db.Model):
-    __tablename__ = "accounts"
+class Project(db.Model):
+    __tablename__ = "projects"
 
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
-    name = db.Column(db.String(100), nullable=False)
-    type = db.Column(db.String(50), nullable=False)  # e.g., Bank, Credit Card, Cash, Wallet
-    balance = db.Column(db.Float, default=0.0)
+    name = db.Column(db.String(150), unique=True, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # Relationship
-    transactions = db.relationship("Transaction", backref="account", lazy=True, cascade="all, delete-orphan")
+    # Relationship: one project can have many domains
+    domains = db.relationship("Domain", backref="project", lazy=True)
 
-    def __repr__(self) -> str:
-        return f"<Account {self.name} (User {self.user_id})>"
+    def __repr__(self):
+        return f"<Project {self.name}>"
 
 
 # ---------------------------
-# Categories
+# Domain Model (Auto-Fetched SSL)
 # ---------------------------
-class Category(db.Model):
-    __tablename__ = "categories"
+class Domain(db.Model):
+    __tablename__ = "domains"
 
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
-    name = db.Column(db.String(100), nullable=False)
-    type = db.Column(db.String(20), nullable=False)  # "income" or "expense"
+    domain_name = db.Column(db.String(255), unique=True, nullable=False)
 
-    # Relationship
-    transactions = db.relationship("Transaction", backref="category", lazy=True)
+    # Link to project
+    project_id = db.Column(db.Integer, db.ForeignKey("projects.id"), nullable=True)
 
-    def __repr__(self) -> str:
-        return f"<Category {self.name} ({self.type})>"
+    # Auto-fetched SSL info
+    provider = db.Column(db.String(150), nullable=True)
+    ssl_expiry = db.Column(db.DateTime, nullable=True)
+    last_checked = db.Column(db.DateTime, default=datetime.utcnow)
 
-
-# ---------------------------
-# Transactions
-# ---------------------------
-class Transaction(db.Model):
-    __tablename__ = "transactions"
-
-    id = db.Column(db.Integer, primary_key=True)
-    account_id = db.Column(db.Integer, db.ForeignKey("accounts.id"), nullable=False)
-    category_id = db.Column(db.Integer, db.ForeignKey("categories.id"), nullable=True)
-    amount = db.Column(db.Float, nullable=False)
-    type = db.Column(db.String(20), nullable=False)  # "income", "expense", "transfer"
-    description = db.Column(db.String(255))
-    transaction_date = db.Column(db.Date, default=date.today)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    def __repr__(self) -> str:
-        return f"<Transaction {self.type} {self.amount} on {self.transaction_date}>"
+    @property
+    def days_left(self):
+        """Compute days left dynamically for auto SSL domains."""
+        if not self.ssl_expiry:
+            return None
+
+        delta = self.ssl_expiry.date() - date.today()
+        return max(0, delta.days)
+    
+    @property
+    def status(self):
+        """Return human-readable SSL status."""
+        if not self.ssl_expiry:
+            return "Unknown"
+
+        days_left = self.days_left
+        if days_left == 0:
+            return "Expired"
+        elif days_left <= 30:
+            return "Expiring Soon"
+        else:
+            return "Active"
+
+    def __repr__(self):
+        return f"<Domain {self.domain_name} (Project ID: {self.project_id})>"
 
 
 # ---------------------------
-# Recurring Transactions (EMI, Subscriptions, etc.)
+# Manual Domain Model (Manually Managed SSL)
 # ---------------------------
-class RecurringTransaction(db.Model):
-    __tablename__ = "recurring_transactions"
+class ManualDomain(db.Model):
+    __tablename__ = "manual_domains"
 
     id = db.Column(db.Integer, primary_key=True)
-    account_id = db.Column(db.Integer, db.ForeignKey("accounts.id"), nullable=False)
-    category_id = db.Column(db.Integer, db.ForeignKey("categories.id"), nullable=True)
-    amount = db.Column(db.Float, nullable=False)
-    type = db.Column(db.String(20), nullable=False)
-    description = db.Column(db.String(255))
-    frequency = db.Column(db.String(20), nullable=False)  # daily, weekly, monthly, yearly
-    start_date = db.Column(db.Date, default=date.today)
-    end_date = db.Column(db.Date, nullable=True)
-    active = db.Column(db.Boolean, default=True)
+    domain_name = db.Column(db.String(255), unique=True, nullable=False)
 
-    def __repr__(self) -> str:
-        return f"<Recurring {self.type} {self.amount} every {self.frequency}>"
+    project_id = db.Column(db.Integer, db.ForeignKey("projects.id"), nullable=True)
+    project = db.relationship('Project', backref='manual_domains')
 
+    provider = db.Column(db.String(150), nullable=True)
+    ssl_expiry = db.Column(db.Date, nullable=True)  # calendar-picked expiry date
 
-# ---------------------------
-# Budgets
-# ---------------------------
-class Budget(db.Model):
-    __tablename__ = "budgets"
-
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
-    category_id = db.Column(db.Integer, db.ForeignKey("categories.id"), nullable=True)
-    amount_limit = db.Column(db.Float, nullable=False)
-    period = db.Column(db.String(20), default="monthly")  # weekly, monthly, yearly
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    def __repr__(self) -> str:
-        return f"<Budget {self.amount_limit} for {self.period}>"
+    @property
+    def days_left(self):
+        """Compute remaining days dynamically for manual domains."""
+        if not self.ssl_expiry:
+            return None
+        delta = self.ssl_expiry - date.today()
+        return max(0, delta.days)
+    
+    @property
+    def status(self):
+        """Return human-readable SSL status."""
+        if not self.ssl_expiry:
+            return "Unknown"
+
+        days_left = self.days_left
+        if days_left == 0:
+            return "Expired"
+        elif days_left <= 30:
+            return "Expiring Soon"
+        else:
+            return "Active"
+
+
+    def __repr__(self):
+        return f"<ManualDomain {self.domain_name} (Project ID: {self.project_id})>"
+
+# ---------------------------
+# Jira Task Model
+# ---------------------------
+class JiraTask(db.Model):
+    __tablename__ = "jira_tasks"
+
+    id = db.Column(db.Integer, primary_key=True)
+    # allow multiple tasks per domain by removing unique=True
+    domain_name = db.Column(db.String(255), nullable=False)
+    # task_type differentiates expiry vs failure (etc.)
+    task_type = db.Column(db.String(50), nullable=False, default="expiry")  # 'expiry' or 'failure'
+    issue_key = db.Column(db.String(50), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<JiraTask {self.domain_name} [{self.task_type}] → {self.issue_key}>"
 

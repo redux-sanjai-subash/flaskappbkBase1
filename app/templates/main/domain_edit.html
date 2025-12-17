@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Domain{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h2 class="mb-4">Edit Domain</h2>
+
+    <form method="POST">
+        <div class="mb-3">
+            <label for="domain_name" class="form-label">Domain Name</label>
+            <input type="text" class="form-control" id="domain_name" name="domain_name"
+                   value="{{ domain.domain_name }}" required>
+        </div>
+
+        <div class="mb-3">
+            <label for="project_id" class="form-label">Project</label>
+            <select class="form-select" id="project_id" name="project_id">
+                <option value="">-- Select Project --</option>
+                {% for project in projects %}
+                    <option value="{{ project.id }}"
+                        {% if domain.project_id == project.id %}selected{% endif %}>
+                        {{ project.name }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <!-- Manual override checkbox -->
+        <div class="form-check mb-3">
+            <input class="form-check-input"
+                   type="checkbox"
+                   id="manual_override"
+                   name="manual_override"
+                   value="1"
+                   {% if domain_type == "manual" %}checked{% endif %}
+                   onchange="toggleManualFields()">
+            <label class="form-check-label" for="manual_override">
+                Manual Override
+            </label>
+        </div>
+
+        <!-- Manual-only fields -->
+        <div id="manual_fields"
+             style="display: {% if domain_type == 'manual' %}block{% else %}none{% endif %};">
+
+            <div class="mb-3">
+                <label for="provider" class="form-label">SSL Provider</label>
+                <input type="text"
+                       class="form-control"
+                       id="provider"
+                       name="provider"
+                       value="{{ domain.provider or '' }}">
+            </div>
+
+            <div class="mb-3">
+                <label for="ssl_expiry" class="form-label">SSL Expiry Date</label>
+                <input type="date"
+                       class="form-control"
+                       id="ssl_expiry"
+                       name="ssl_expiry"
+                       value="{{ domain.ssl_expiry.strftime('%Y-%m-%d') if domain.ssl_expiry else '' }}">
+            </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Update Domain</button>
+        <a href="{{ url_for('main.dashboard') }}" class="btn btn-secondary">Cancel</a>
+    </form>
+</div>
+
+<script>
+function toggleManualFields() {
+    const checkbox = document.getElementById("manual_override");
+    const fields = document.getElementById("manual_fields");
+    fields.style.display = checkbox.checked ? "block" : "none";
+}
+</script>
+{% endblock %}
+
