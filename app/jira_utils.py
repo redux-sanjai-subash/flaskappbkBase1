@@ -177,7 +177,11 @@ def create_or_comment_change_task(
 ):
     """
     Comment on an existing Jira task when a live SSL cert (provider/expiry) changes.
-    This function will NOT create a new Jira ticket.
+
+    Rules:
+    - NEVER create a new Jira ticket
+    - Comment only if an existing Jira task already exists
+      (expiry task preferred, failure task as fallback)
     """
     jira = init_jira_connection()
     if jira is None:
@@ -204,24 +208,27 @@ def create_or_comment_change_task(
     )
 
     try:
-        issue_key = get_issue_key(domain_name, "change")
+        # Prefer expiry ticket, fallback to failure ticket
+        issue_key = (
+            get_issue_key(domain_name, "expiry")
+            or get_issue_key(domain_name, "failure")
+        )
 
         if not issue_key:
             current_app.logger.info(
-                f"No existing Jira change task for {domain_name}; skipping change notification."
+                f"No existing Jira expiry/failure task for {domain_name}; skipping change notification."
             )
             return
 
         jira.add_comment(issue_key, msg)
         current_app.logger.info(
-            f"Commented SSL change on existing Jira task {issue_key} for {domain_name}"
+            f"Commented SSL change on Jira task {issue_key} for {domain_name}"
         )
 
     except JIRAError as e:
         current_app.logger.error(
-            f"Failed to comment on Jira change task for {domain_name}: {e}"
+            f"Failed to comment on Jira task for {domain_name}: {e}"
         )
-
 
 
 # ---------------------------
