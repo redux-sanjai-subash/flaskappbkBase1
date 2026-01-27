@@ -258,10 +258,14 @@ def sync_jira_tasks():
     Scheduled function that checks both regular and manual SSL domains nearing expiry
     and syncs them with Jira (create or update tasks).
 
-    - Creates a Jira task (under fixed Jira project) when 0 <= days_left <= 30 and no task exists.
-    - Adds an update comment on exact thresholds (20 and 10 days) if a task already exists.
+    Rules for expiry Jira tasks:
+    - Create an expiry Jira task when 0 <= days_left <= 30 IF:
+        - no expiry task exists, OR
+        - existing expiry task is older than 30 days
+    - Do NOT create a new expiry task if an existing expiry task is <= 30 days old
+    - Add update comments at exact thresholds (20 and 10 days)
     """
-    from .models import Domain, ManualDomain  # imported here to avoid circular imports
+    from .models import Domain, ManualDomain
     from datetime import datetime as _dt
 
     try:
@@ -280,57 +284,105 @@ def sync_jira_tasks():
         for domain in all_domains:
             try:
                 if not getattr(domain, "ssl_expiry", None):
-                    current_app.logger.debug("Skipping domain=%s: no ssl_expiry set", getattr(domain, "domain_name", "<unknown>"))
+                    current_app.logger.debug(
+                        "Skipping domain=%s: no ssl_expiry set",
+                        getattr(domain, "domain_name", "<unknown>")
+                    )
                     continue
 
                 expiry_ref = domain.ssl_expiry
 
-                # normalize expiry_ref to a date object whether stored as datetime or date
+                # Normalize expiry_ref to date
                 if hasattr(expiry_ref, "date"):
                     expiry_date = expiry_ref.date()
                 else:
                     expiry_date = expiry_ref
 
-                # ensure expiry_date is a date
                 if not hasattr(expiry_date, "isoformat"):
-                    current_app.logger.warning("Skipping domain=%s: ssl_expiry not date-like (%r)", domain.domain_name, expiry_ref)
+                    current_app.logger.warning(
+                        "Skipping domain=%s: ssl_expiry not date-like (%r)",
+                        domain.domain_name,
+                        expiry_ref,
+                    )
                     continue
 
                 expiry_days = (expiry_date - today).days
 
                 current_app.logger.debug(
-                    "Domain check: name=%s project=%s provider=%s expiry=%s days_left=%d",
+                    "Domain check: name=%s expiry=%s days_left=%d",
                     domain.domain_name,
-                    getattr(getattr(domain, "project", None), "name", None),
-                    getattr(domain, "provider", None),
                     expiry_date.isoformat(),
                     expiry_days,
                 )
 
-                issue_key = get_issue_key(domain.domain_name, "expiry")
-                current_app.logger.debug("Domain %s has issue_key=%s", domain.domain_name, issue_key)
+                # --- Expiry Jira task lookup (historical, not just active mapping)
+                expiry_record = JiraTask.query.filter_by(
+                    domain_name=domain.domain_name,
+                    task_type="expiry",
+                ).first()
 
-                # Create: only for non-expired domains within the 30-day creation window
-                if 0 <= expiry_days <= 30 and not issue_key:
+                # --- Creation / reuse logic
+                if 0 <= expiry_days <= 30:
+                    if expiry_record:
+                        created_date = expiry_record.created_at.date()
+                        age_days = (today - created_date).days
+
+                        if age_days <= 30:
+                            # Valid expiry task already exists → no new task
+                            current_app.logger.info(
+                                "Existing expiry Jira task %s for %s is %d days old (≤30); skipping creation",
+                                expiry_record.issue_key,
+                                domain.domain_name,
+                                age_days,
+                            )
+
+                            # Threshold updates still apply
+                            if expiry_days in (20, 10):
+                                current_app.logger.info(
+                                    "Updating Jira expiry task %s for domain=%s (days_left=%d)",
+                                    expiry_record.issue_key,
+                                    domain.domain_name,
+                                    expiry_days,
+                                )
+                                update_jira_task(
+                                    expiry_record.issue_key,
+                                    domain.domain_name,
+                                    expiry_days,
+                                )
+
+                            continue
+
+                        # Existing expiry task is stale (>30 days) → create new
+                        current_app.logger.info(
+                            "Existing expiry Jira task %s for %s is %d days old (>30); creating new expiry task",
+                            expiry_record.issue_key,
+                            domain.domain_name,
+                            age_days,
+                        )
+                        create_jira_task(domain, expiry_days)
+                        continue
+
+                    # No expiry task exists at all → create new
                     current_app.logger.info(
-                        "Creating Jira expiry task for domain=%s (days_left=%d)", domain.domain_name, expiry_days
+                        "No expiry Jira task exists for %s; creating new expiry task (days_left=%d)",
+                        domain.domain_name,
+                        expiry_days,
                     )
                     create_jira_task(domain, expiry_days)
-                    continue  # move to next domain
+                    continue
 
-                # Update: add comment at exact thresholds (20 and 10 days) if issue already exists
-                if issue_key and expiry_days in (20, 10):
-                    current_app.logger.info(
-                        "Updating Jira expiry task %s for domain=%s (days_left=%d)", issue_key, domain.domain_name, expiry_days
-                    )
-                    update_jira_task(issue_key, domain.domain_name, expiry_days)
+                # --- No action outside 30-day window
 
-                # No action for other cases (expired already, >30 days, or no threshold hit)
             except Exception as dom_e:
                 # Per-domain exception should not stop the whole sync run
-                current_app.logger.exception("Error processing domain %s during Jira sync: %s", getattr(domain, "domain_name", "<unknown>"), dom_e)
+                current_app.logger.exception(
+                    "Error processing domain %s during Jira sync: %s",
+                    getattr(domain, "domain_name", "<unknown>"),
+                    dom_e,
+                )
 
         current_app.logger.info("Jira sync completed successfully.")
+
     except Exception as e:
         current_app.logger.exception("Fatal error during Jira sync: %s", e)
 
