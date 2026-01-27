@@ -50,24 +50,43 @@ def get_issue_key(domain_name, task_type):
 
 def store_issue_key(domain_name, task_type, issue_key):
     """
-    Store Jira issue key mapping for a domain + task_type.
+    Store or replace the active Jira issue mapping for a domain.
+    Enforces ONE row per domain.
     """
     try:
+        record = JiraTask.query.filter_by(domain_name=domain_name).first()
+
+        if record:
+            # Replace existing mapping
+            record.issue_key = issue_key
+            record.task_type = task_type
+            record.created_at = datetime.utcnow()
+            db.session.commit()
+
+            current_app.logger.info(
+                f"Replaced active Jira task for {domain_name} → {issue_key} [{task_type}]"
+            )
+            return
+
+        # First-time insert
         record = JiraTask(
             domain_name=domain_name,
             task_type=task_type,
-            issue_key=issue_key
+            issue_key=issue_key,
         )
         db.session.add(record)
         db.session.commit()
+
         current_app.logger.info(
-            f"Stored Jira issue {issue_key} for {domain_name} [{task_type}]"
+            f"Stored Jira task {issue_key} for {domain_name} [{task_type}]"
         )
+
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(
             f"Failed to store Jira task for {domain_name} [{task_type}]: {e}"
         )
+
 
 
 def create_jira_task(domain, expiry_days):
