@@ -41,34 +41,38 @@ def get_issue_key(domain_name, task_type):
     Retrieve Jira issue key for a domain + task_type.
     task_type examples: 'expiry', 'failure'
     """
-    record = JiraTask.query.filter_by(
-        domain_name=domain_name,
-        task_type=task_type
-    ).first()
+    record = (
+        JiraTask.query
+        .filter_by(domain_name=domain_name, task_type=task_type)
+        .order_by(JiraTask.created_at.desc())
+        .first()
+    )
     return record.issue_key if record else None
 
 
 def store_issue_key(domain_name, task_type, issue_key):
     """
-    Store or replace the active Jira issue mapping for a domain.
-    Enforces ONE row per domain.
+    Store Jira issue mapping per (domain_name, task_type).
+    Does NOT overwrite other task types.
     """
     try:
-        record = JiraTask.query.filter_by(domain_name=domain_name).first()
+        record = JiraTask.query.filter_by(
+            domain_name=domain_name,
+            task_type=task_type,
+        ).first()
 
         if record:
-            # Replace existing mapping
+            # Same task type already exists → update key & timestamp
             record.issue_key = issue_key
-            record.task_type = task_type
             record.created_at = datetime.utcnow()
             db.session.commit()
 
             current_app.logger.info(
-                f"Replaced active Jira task for {domain_name} → {issue_key} [{task_type}]"
+                f"Updated Jira task for {domain_name} [{task_type}] → {issue_key}"
             )
             return
 
-        # First-time insert
+        # Insert new task row
         record = JiraTask(
             domain_name=domain_name,
             task_type=task_type,
@@ -315,6 +319,18 @@ def sync_jira_tasks():
                     expiry_days,
                 )
 
+                # --------------------------------------------------
+                # Guard: do NOT create expiry task if failure exists
+                # --------------------------------------------------
+                failure_issue_key = get_issue_key(domain.domain_name, "failure")
+                if failure_issue_key:
+                    current_app.logger.info(
+                        "Skipping expiry Jira task for %s due to active failure Jira task %s",
+                        domain.domain_name,
+                        failure_issue_key,
+                    )
+                    continue
+
                 # --- Expiry Jira task lookup (historical, not just active mapping)
                 expiry_record = JiraTask.query.filter_by(
                     domain_name=domain.domain_name,
@@ -469,4 +485,3 @@ def check_regular_domains_and_sync_failures():
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Error during SSL failure/change check: {e}")
-
