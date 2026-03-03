@@ -16,7 +16,7 @@ The application:
 - Detects SSL failures and certificate changes
 - Provides a simple web dashboard for management
 
-This application is **internal-only** and deployed on **AWS EC2 (Amazon Linux 2)**.  
+This application is deployed on **AWS EC2 (Amazon Linux 2)**.  
 It uses **SQLite** as the database backend.
 
 ---
@@ -37,7 +37,6 @@ It uses **SQLite** as the database backend.
 - Used for internal or restricted domains
 - Expiry date is stored manually
 - Included in expiry monitoring
-- Not included in automatic SSL failure checks
 
 ---
 
@@ -46,12 +45,9 @@ It uses **SQLite** as the database backend.
 ### Expiry Tasks
 
 - A Jira task is created when a certificate has **30 days or fewer remaining**
-- A new task is **NOT created** if:
-  - An existing expiry task exists and is less than 30 days old
 - Jira comments are added at:
   - 20 days remaining
   - 10 days remaining
-- Expiry tasks are not created if a failure task already exists
 
 ---
 
@@ -60,7 +56,6 @@ It uses **SQLite** as the database backend.
 If SSL fetch fails (unreachable, timeout, handshake issue):
 
 - A Jira failure task is created once
-- No repeated updates are posted
 
 ---
 
@@ -69,7 +64,6 @@ If SSL fetch fails (unreachable, timeout, handshake issue):
 If the SSL provider or expiry date changes:
 
 - A comment is added to the existing Jira task
-- No new ticket is created
 - Database is updated with the new values
 
 ---
@@ -123,18 +117,6 @@ The following Jira configuration must be provided via environment variables:
     JIRA_EMAIL
     JIRA_API_TOKEN
 
-Ensure credentials are securely stored and not committed to the repository.
-
----
-
-## Running Locally
-
-    pip install -r requirements.txt
-    flask db upgrade
-    flask run
-
-Make sure environment variables are configured before running the application.
-
 ---
 
 ## Status Logic
@@ -151,6 +133,6 @@ Make sure environment variables are configured before running the application.
 ## Notes
 
 - This tool is designed for internal SSL monitoring.
-- Jira is used as the alerting mechanism (no email alerts).
+- Jira is used as the alerting mechanism.
 - SQLite is used for simplicity and internal deployment.
 - Failure tasks prevent duplicate expiry task creation.
